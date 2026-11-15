@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portal Verifikasi Izin</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#1c2430;--mu:#6b7686;--bd:#e2e6ec;--pr:#c8102e;--ok:#15803d;--no:#b91c1c;--wa:#b45309}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d222a;--tx:#e8ecf2;--mu:#98a3b3;--bd:#2c333d;--ok:#4ade80;--no:#f87171;--wa:#fbbf24}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{background:var(--pr);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+header h1{font-size:18px;margin:0}main{max-width:960px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:18px;margin-bottom:16px}
+h2{font-size:16px;margin:0 0 12px}label{display:block;font-size:13px;color:var(--mu);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:9px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+button{padding:9px 16px;border:0;border-radius:6px;background:var(--pr);color:#fff;font:inherit;cursor:pointer}
+header button{background:#fff;color:var(--pr)}button.ok{background:var(--ok);color:#fff}button.no{background:var(--no);color:#fff}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--bd);vertical-align:top}
+th{color:var(--mu);font-weight:600;white-space:nowrap}.b{padding:2px 8px;border-radius:99px;font-size:12px;border:1px solid currentColor}
+.Menunggu{color:var(--wa)}.Disetujui{color:var(--ok)}.Ditolak{color:var(--no)}
+.tabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}.tabs button{background:var(--bd);color:var(--tx)}.tabs button.on{background:var(--pr);color:#fff}
+.note{font-size:12px;color:var(--mu)}.err{color:var(--no);font-size:13px;margin-top:8px}
+@media(max-width:600px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>Portal Verifikasi Izin</h1><button id="mode" onclick="toggleAdmin()"></button></header>
+<main id="app"></main>
+<script>
+const CONFIG = {
+  CSV_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vTdwy2UA8PCCtYh2Mt_7fcZy14F5dF9T3Q0WZqYMd7iPx2JXAeDITAIlXRtBDrX5VRzLPo0vvfECEH5/pub?gid=0&single=true&output=csv",
+  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbzhAK8FmoVePU-HDxI7lloHKSaEnDC7D81r1KkzYJ384AfqaSAXaHEplYUcbsyD4pk3Gw/exec",   // URL Web App Apps Script. Kosong = MODE DEMO (data lokal di browser)
+  DEMO_KODE: "demo123" // kode persetujuan untuk mode demo
+};
+const DEMO = !CONFIG.SCRIPT_URL;
+let rows = [], tab = "Menunggu", err = "", kode = null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = d => d ? new Date(d).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric"}) : "-";
+
+function parseCSV(t){const r=[];let row=[],f="",q=false;for(let i=0;i<t.length;i++){const c=t[i];
+  if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}
+  else if(c=='"')q=true;else if(c==","){row.push(f);f=""}
+  else if(c=="\n"){row.push(f);r.push(row);row=[];f=""}else if(c!="\r")f+=c}
+  if(f||row.length){row.push(f);r.push(row)}return r}
+
+async function api(action,data={}){
+  const r=await fetch(CONFIG.SCRIPT_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action,...data})});
+  const t=await r.text();
+  try{return JSON.parse(t)}catch(e){throw new Error("Apps Script tidak membalas JSON. Cek Deploy: 'Who has access' harus Anyone, dan pakai URL /exec.")}
+}
+async function load(){
+  err="";
+  try{
+    if(DEMO){rows=JSON.parse(localStorage.getItem("izin_demo")||"[]");return}
+    const t=await (await fetch(CONFIG.CSV_URL+"&t="+Date.now())).text();
+    const [h,...d]=parseCSV(t).filter(r=>r.length>1);
+    rows=d.map(r=>Object.fromEntries(h.map((k,i)=>[k.trim().toLowerCase().replace(/\s+/g,"_"),r[i]||""])));
+  }catch(e){err="Gagal memuat data: "+e.message}
+}
+async function toggleAdmin(){
+  if(kode!==null){kode=null;render();return}
+  const k=prompt("Masukkan kode persetujuan:");
+  if(!k)return;
+  if(DEMO){ if(k!==CONFIG.DEMO_KODE){alert("Kode salah.");return} }
+  else{ const r=await api("cek",{kode:k}); if(!r.ok){alert("Kode salah.");return} }
+  kode=k;render();
+}
+async function submitIzin(e){
+  e.preventDefault();
+  const f=e.target, btn=f.querySelector("button"), st=f.querySelector("#st");
+  const say=(m,bad)=>{st.textContent=m;st.className=bad?"err":"note";if(!bad&&m.startsWith("Pengajuan terkirim"))st.style.color="var(--ok)";else st.style.color=""};
+  const rec={id:"IZ"+Date.now(),waktu:new Date().toISOString(),nama:f.nama.value.trim(),jenis:f.jenis.value,
+    mulai:f.mulai.value,selesai:f.selesai.value,alasan:f.alasan.value.trim(),status:"Menunggu",diproses_oleh:"",catatan:"",waktu_proses:""};
+  if(rec.selesai<rec.mulai){say("Tanggal selesai tidak boleh sebelum tanggal mulai.",true);return}
+  btn.disabled=true;btn.textContent="Mengirim… (bisa 5–10 detik)";say("");
+  try{
+    if(DEMO){rows.push(rec);localStorage.setItem("izin_demo",JSON.stringify(rows))}
+    else{const r=await api("submit",{data:rec});if(!r.ok)throw new Error(r.error||"Ditolak oleh server.");rows.push(rec)}
+    f.reset();tab="Menunggu";render();
+    const s2=document.querySelector("#st");s2.textContent="Pengajuan terkirim ✓";s2.style.color="var(--ok)";
+  }catch(x){say("Gagal mengirim: "+x.message,true);btn.disabled=false;btn.textContent="Kirim Pengajuan"}
+}
+async function decide(id,status){
+  const catatan=prompt(status=="Ditolak"?"Alasan penolakan:":"Catatan (opsional):","");
+  if(catatan===null)return;
+  if(DEMO){const r=rows.find(x=>x.id==id);Object.assign(r,{status,diproses_oleh:"Super User",catatan,waktu_proses:new Date().toISOString()});localStorage.setItem("izin_demo",JSON.stringify(rows))}
+  else{try{const r=await api("decide",{kode,id,status,catatan});if(!r.ok){alert(r.error);return}Object.assign(rows.find(x=>x.id==id),{status,diproses_oleh:"Super User",catatan,waktu_proses:new Date().toISOString()})}catch(x){alert("Gagal: "+x.message);return}}
+  render();
+}
+function table(list){
+  const adm=kode!==null;
+  if(!list.length)return '<p class="note">Belum ada data.</p>';
+  return `<div class="tw"><table><tr><th>Diajukan</th><th>Nama</th><th>Jenis</th><th>Periode</th><th>Alasan</th><th>Status</th><th>${adm?"Aksi":"Catatan"}</th></tr>`+
+  list.slice().reverse().map(r=>`<tr><td>${fmt(r.waktu)}</td><td>${esc(r.nama)}</td><td>${esc(r.jenis)}</td><td>${fmt(r.mulai)} – ${fmt(r.selesai)}</td><td>${esc(r.alasan)}</td>
+  <td><span class="b ${esc(r.status)}">${esc(r.status)}</span></td>
+  <td>${adm&&r.status=="Menunggu"?`<button class="ok" onclick="decide('${esc(r.id)}','Disetujui')">Setujui</button> <button class="no" onclick="decide('${esc(r.id)}','Ditolak')">Tolak</button>`:`<span class="note">${esc(r.catatan)}</span>`}</td></tr>`).join("")+"</table></div>";
+}
+function render(){
+  $("#mode").textContent=kode!==null?"Keluar Mode Persetujuan":"Mode Persetujuan";
+  const list=tab=="Semua"?rows:rows.filter(r=>r.status==tab);
+  $("#app").innerHTML=`<div class="card"><h2>Ajukan Izin</h2><form onsubmit="submitIzin(event)">
+  <label>Nama</label><input name="nama" required>
+  <div class="row"><div><label>Jenis</label><select name="jenis"><option>Sakit</option><option>Izin</option><option>Cuti</option><option>Lainnya</option></select></div><div></div></div>
+  <div class="row"><div><label>Mulai</label><input type="date" name="mulai" required></div><div><label>Selesai</label><input type="date" name="selesai" required></div></div>
+  <label>Alasan</label><textarea name="alasan" rows="3" required></textarea><p><button>Kirim Pengajuan</button></p><div id="st" class="note"></div></form>
+  ${DEMO?'<p class="note">MODE DEMO – data tersimpan di browser ini saja. Kode persetujuan demo: admin</p>':""}</div>
+  <div class="card"><h2>Daftar Pengajuan</h2><div class="tabs">${["Menunggu","Disetujui","Ditolak","Semua"].map(t=>`<button class="${t==tab?"on":""}" onclick="tab='${t}';render()">${t} (${t=="Semua"?rows.length:rows.filter(r=>r.status==t).length})</button>`).join("")}</div>
+  ${table(list)}${err?`<div class="err">${esc(err)}</div>`:""}</div>`;
+}
+render();load().then(render);
+</script>
+</body>
+</html>
